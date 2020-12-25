@@ -1,0 +1,3 @@
+service:
+  name: Micro Gateway
+  port: 8080

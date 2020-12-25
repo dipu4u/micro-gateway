@@ -1,7 +1,8 @@
-*.jar
 .idea
 .gradle
 .git
+.DS_Store
+build/
 gradle/
 target/
 bin/
