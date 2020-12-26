@@ -1,18 +1,18 @@
 package io.axiom.gateway.http;
 
 import io.axiom.gateway.service.NetworkService;
-import io.axiom.gateway.service.RequestProcessor;
+import io.axiom.gateway.service.SocketHandler;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.net.InetSocketAddress;
+import java.nio.channels.CancelledKeyException;
 import java.nio.channels.SelectionKey;
 import java.nio.channels.Selector;
 import java.nio.channels.ServerSocketChannel;
+import java.nio.channels.SocketChannel;
 import java.util.Iterator;
-import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
 
 public class HttpNetworkServiceImpl implements NetworkService, Runnable {
 
@@ -21,11 +21,12 @@ public class HttpNetworkServiceImpl implements NetworkService, Runnable {
 	private boolean listen = false;
 	
 	private ServerSocketChannel serverSocket = null;
-	
 	private Selector selector = null;
-	
-	private Map<Integer, RequestProcessor> processors = new ConcurrentHashMap<>(3, 1.0f);
-	
+
+	private SocketHandler acceptRequestHandler = null;
+	private SocketHandler readRequestHandler = null;
+	private SocketHandler writeResponseHandler = null;
+
 	public HttpNetworkServiceImpl() {}
 	
 	@Override
@@ -40,25 +41,27 @@ public class HttpNetworkServiceImpl implements NetworkService, Runnable {
 		while(listen) {
 			try {
 				int count = selector.select();
-	            if(count > 0) {
-	                for(Iterator<SelectionKey> i = selector.selectedKeys().iterator(); i.hasNext();) {
+	            if (count > 0) {
+	                for (Iterator<SelectionKey> i = selector.selectedKeys().iterator(); i.hasNext();) {
 	                    SelectionKey key = i.next();
 	                    i.remove();
-	                    if(key.isAcceptable()) {
-	                    	RequestProcessor processor = processors.get(SelectionKey.OP_ACCEPT);
-	                    	processor.handleRequest(key);
+	                    if (key.isAcceptable()) {
+							acceptRequestHandler.handle(key);
 	                    }
-	                    if(key.isReadable()) {
-	                    	RequestProcessor processor = processors.get(SelectionKey.OP_READ);
-	                    	processor.handleRequest(key);
+	                    if (key.isReadable()) {
+							SocketChannel channel = readRequestHandler.handle(key);
+							if (null != channel) channel.register(selector, SelectionKey.OP_WRITE);
 	                    }
-	                    if(key.isWritable()) {
-	                    	RequestProcessor processor = processors.get(SelectionKey.OP_WRITE);
-	                    	processor.handleRequest(key);
-	                    }
+	                    try {
+							if (key.isWritable()) {
+								writeResponseHandler.handle(key);
+							}
+						} catch(CancelledKeyException cke) {}
 	                }
 	            }
-			}catch(Exception e) {}
+			} catch(Exception e) {
+				log.error(e.getMessage(), e);
+			}
 		}
 	}
 	
@@ -70,12 +73,12 @@ public class HttpNetworkServiceImpl implements NetworkService, Runnable {
 			serverSocket.configureBlocking(false);
 			InetSocketAddress inetSocketAddress = new InetSocketAddress(serverPort);
 			serverSocket.socket().bind(inetSocketAddress);
-			serverSocket.register(selector, SelectionKey.OP_ACCEPT);
+			serverSocket.register(selector, serverSocket.validOps(), null);
 			listen = true;
-			
-			processors.put(SelectionKey.OP_ACCEPT, new RequestAcceptor(selector));
-			processors.put(SelectionKey.OP_READ, new RequestReader(selector));
-			processors.put(SelectionKey.OP_WRITE, new ResponseWriter(selector));
+
+			acceptRequestHandler = new AcceptRequestHandler(selector, serverSocket);
+			readRequestHandler = new ReadRequestHandler(selector);
+			writeResponseHandler = new WriteResponseHandler(selector);
 			log.info("Server initialised on port {}", serverPort);
 		} catch(IOException e) {
 			log.error(e.getMessage(), e);
