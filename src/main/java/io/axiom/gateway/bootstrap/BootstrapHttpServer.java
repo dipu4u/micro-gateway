@@ -1,4 +1,4 @@
-package io.axiom.gateway;
+package io.axiom.gateway.bootstrap;
 
 import io.axiom.gateway.service.NetworkService;
 import io.axiom.gateway.config.ApplicationProperties;

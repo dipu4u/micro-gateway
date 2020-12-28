@@ -1,14 +1,16 @@
 package io.axiom.gateway.http;
 
+import io.axiom.gateway.constants.SocketConstant;
 import io.axiom.gateway.service.AbstractSocketHandler;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
+import java.net.Socket;
 import java.nio.channels.SelectionKey;
-import java.nio.channels.Selector;
 import java.nio.channels.ServerSocketChannel;
 import java.nio.channels.SocketChannel;
+import java.util.UUID;
 
 public class AcceptRequestHandler extends AbstractSocketHandler {
 
@@ -16,23 +18,29 @@ public class AcceptRequestHandler extends AbstractSocketHandler {
 
 	private final ServerSocketChannel serverSocketChannel;
 
-	AcceptRequestHandler(Selector selector, ServerSocketChannel serverSocketChannel) {
-		super(selector);
+	AcceptRequestHandler(ServerSocketChannel serverSocketChannel) {
 		this.serverSocketChannel = serverSocketChannel;
 	}
 
 	@Override
-	public SocketChannel handle(SelectionKey key) {
+	public void handle(SelectionKey key) {
 		SocketChannel channel = null;
 		try {
 			channel = serverSocketChannel.accept();
 			channel.configureBlocking(false);
-			channel.finishConnect();
-			channel.register(selector, SelectionKey.OP_READ);
+			Socket socket = channel.socket();
+			socket.setReuseAddress(SocketConstant.RE_USE_ADDRESS);
+			socket.setTcpNoDelay(SocketConstant.TCP_NO_DELAY);
+			socket.setSoTimeout(SocketConstant.SOCKET_TIMEOUT);
+			socket.setPerformancePreferences(1, 1, 2);
+
+			if (channel.isConnectionPending())
+				channel.finishConnect();
+			channel.register(key.selector(), SelectionKey.OP_READ, UUID.randomUUID().toString());
 		} catch(IOException ioe) {
-			log.error(ioe.getMessage(), ioe);
 			closeRequest(channel);
+			log.error(ioe.getMessage(), ioe);
 		}
-		return null;
 	}
+
 }

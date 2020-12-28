@@ -1,17 +1,16 @@
 package io.axiom.gateway.http;
 
+import io.axiom.gateway.constants.SocketConstant;
 import io.axiom.gateway.service.NetworkService;
-import io.axiom.gateway.service.SocketHandler;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.net.InetSocketAddress;
-import java.nio.channels.CancelledKeyException;
+import java.net.ServerSocket;
 import java.nio.channels.SelectionKey;
 import java.nio.channels.Selector;
 import java.nio.channels.ServerSocketChannel;
-import java.nio.channels.SocketChannel;
 import java.util.Iterator;
 
 public class HttpNetworkServiceImpl implements NetworkService, Runnable {
@@ -19,16 +18,9 @@ public class HttpNetworkServiceImpl implements NetworkService, Runnable {
 	private final static Logger log = LoggerFactory.getLogger(HttpNetworkServiceImpl.class);
 	
 	private boolean listen = false;
-	
-	private ServerSocketChannel serverSocket = null;
+	private ServerSocketChannel serverSocketChannel = null;
 	private Selector selector = null;
 
-	private SocketHandler acceptRequestHandler = null;
-	private SocketHandler readRequestHandler = null;
-	private SocketHandler writeResponseHandler = null;
-
-	public HttpNetworkServiceImpl() {}
-	
 	@Override
 	public void startServer() {
 		Thread thread = new Thread(this);
@@ -46,17 +38,14 @@ public class HttpNetworkServiceImpl implements NetworkService, Runnable {
 	                    SelectionKey key = i.next();
 	                    i.remove();
 	                    if (key.isAcceptable()) {
-							acceptRequestHandler.handle(key);
+	                    	new AcceptRequestHandler(serverSocketChannel).handle(key);
 	                    }
 	                    if (key.isReadable()) {
-							SocketChannel channel = readRequestHandler.handle(key);
-							if (null != channel) channel.register(selector, SelectionKey.OP_WRITE);
+	                    	new ReadRequestHandler().handle(key);
 	                    }
-	                    try {
-							if (key.isWritable()) {
-								writeResponseHandler.handle(key);
-							}
-						} catch(CancelledKeyException cke) {}
+						if (key.isValid() && key.isWritable()) {
+							new WriteResponseHandler().handle(key);
+						}
 	                }
 	            }
 			} catch(Exception e) {
@@ -69,16 +58,17 @@ public class HttpNetworkServiceImpl implements NetworkService, Runnable {
 	public void initServer(int serverPort) {
 		try {
 			selector = Selector.open();
-			serverSocket = ServerSocketChannel.open();
-			serverSocket.configureBlocking(false);
+			serverSocketChannel = ServerSocketChannel.open();
+			serverSocketChannel.configureBlocking(false);
 			InetSocketAddress inetSocketAddress = new InetSocketAddress(serverPort);
-			serverSocket.socket().bind(inetSocketAddress);
-			serverSocket.register(selector, serverSocket.validOps(), null);
+			serverSocketChannel.socket().bind(inetSocketAddress, SocketConstant.SOCKET_BACKLOG);
+			serverSocketChannel.register(selector, SelectionKey.OP_ACCEPT, null);
+			ServerSocket serverSocket = serverSocketChannel.socket();
+			serverSocket.setSoTimeout(SocketConstant.SOCKET_TIMEOUT);
+			serverSocket.setReuseAddress(SocketConstant.RE_USE_ADDRESS);
+			serverSocket.setReceiveBufferSize(SocketConstant.SND_RCV_BUFFER_SIZE);
+			serverSocket.setPerformancePreferences(1, 1, 2);
 			listen = true;
-
-			acceptRequestHandler = new AcceptRequestHandler(selector, serverSocket);
-			readRequestHandler = new ReadRequestHandler(selector);
-			writeResponseHandler = new WriteResponseHandler(selector);
 			log.info("Server initialised on port {}", serverPort);
 		} catch(IOException e) {
 			log.error(e.getMessage(), e);
